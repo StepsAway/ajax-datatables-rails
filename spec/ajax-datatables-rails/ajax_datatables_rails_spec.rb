@@ -86,7 +86,9 @@ describe AjaxDatatablesRails::Base do
         allow(datatable).to receive(:sortable_displayed_columns) { ["0", "1"] }
         allow(datatable).to receive(:sortable_columns) { ['User.foo', 'User.bar', 'User.baz'] }
 
-        expect(datatable.send(:sort_column, sort_view.params[:order]["0"])).to eq('users.bar')
+        column = datatable.send(:sort_column, sort_view.params[:order]["0"])
+        expectedColunm = AjaxDatatablesRails::StandardColumn.new(User, 'bar', :pg)
+        expect(column).to eq(expectedColunm)
       end
     end
 
@@ -101,7 +103,7 @@ describe AjaxDatatablesRails::Base do
           }
         )
         datatable = AjaxDatatablesRails::Base.new(sorting_view)
-        expect(datatable.send(:sort_direction, sorting_view.params[:order]["0"])).to eq('DESC')
+        expect(datatable.send(:sort_direction, sorting_view.params[:order]["0"])).to eq(:desc)
       end
 
       it 'can only be one option from ASC or DESC' do
@@ -114,7 +116,7 @@ describe AjaxDatatablesRails::Base do
           }
         )
         datatable = AjaxDatatablesRails::Base.new(sorting_view)
-        expect(datatable.send(:sort_direction, sorting_view.params[:order]["0"])).to eq('ASC')
+        expect(datatable.send(:sort_direction, sorting_view.params[:order]["0"])).to eq(:asc)
       end
     end
 
@@ -226,74 +228,94 @@ describe AjaxDatatablesRails::Base do
   end
 end
 
-describe AjaxDatatablesRails::Filter do
-  describe '#from_column' do
+describe AjaxDatatablesRails::Column do
+  describe '#from_string' do
     context "when model class name is regular" do
       it "should successfully get right model class" do
-        expect(AjaxDatatablesRails::Filter).to receive(:new).with(User, 'bar', 'bar', :pg)
-        AjaxDatatablesRails::Filter.from_column('User.bar', 'bar', :pg)
+        expect(AjaxDatatablesRails::StandardColumn).to receive(:new).with(User, 'bar', :pg)
+        AjaxDatatablesRails::Column.from_string('User.bar', :pg)
       end
     end
 
     context "when custom named model class" do
       it "should successfully get right model class" do
-        expect(AjaxDatatablesRails::Filter).to receive(:new).with(Statistics::Request, 'bar', 'bar', :pg)
-        AjaxDatatablesRails::Filter.from_column('Statistics::Request.bar', 'bar', :pg)
+        expect(AjaxDatatablesRails::StandardColumn).to receive(:new).with(Statistics::Request, 'bar', :pg)
+        AjaxDatatablesRails::Column.from_string('Statistics::Request.bar', :pg)
       end
     end
 
 
     context "when model class name camelcased" do
       it "should successfully get right model class" do
-        expect(AjaxDatatablesRails::Filter).to receive(:new).with(PurchasedOrder, 'bar', 'bar', :pg)
-        AjaxDatatablesRails::Filter.from_column('PurchasedOrder.bar', 'bar', :pg)
+        expect(AjaxDatatablesRails::StandardColumn).to receive(:new).with(PurchasedOrder, 'bar', :pg)
+        AjaxDatatablesRails::Column.from_string('PurchasedOrder.bar', :pg)
       end
     end
 
     context "when model class name is namespaced" do
       it "should successfully get right model class" do
-        expect(AjaxDatatablesRails::Filter).to receive(:new).with(Statistics::Session, 'bar', 'bar', :pg)
-        AjaxDatatablesRails::Filter.from_column('Statistics::Session.bar', 'bar', :pg)
+        expect(AjaxDatatablesRails::StandardColumn).to receive(:new).with(Statistics::Session, 'bar', :pg)
+        AjaxDatatablesRails::Column.from_string('Statistics::Session.bar', :pg)
       end
     end
 
     context "when model class defined but not found" do
       it "raise 'uninitialized constant'" do
         expect {
-          AjaxDatatablesRails::Filter.from_column('UnexistentModel.bar', 'bar', :pg)
+          AjaxDatatablesRails::Column.from_string('UnexistentModel.bar', :pg)
         }.to raise_error(NameError, /uninitialized constant/)
       end
     end
 
+    context "when the column is an enum" do
+      it "should successfully create an enum column" do
+        expect(AjaxDatatablesRails::EnumColumn).to receive(:new).with(User, 'status', :pg)
+        AjaxDatatablesRails::Column.from_string('User.status', :pg)
+      end
+    end
+
     context 'when using deprecated notation' do
-      it 'should successfully get right model class if exists' do
-        expect(AjaxDatatablesRails::Filter).to receive(:new).with(User, 'bar', 'bar', :pg)
-        AjaxDatatablesRails::Filter.from_column('users.bar', 'bar', :pg)
+      it "should successfully get right model class if exists" do
+        expect(AjaxDatatablesRails::StandardColumn).to receive(:new).with(User, 'bar', :pg)
+        AjaxDatatablesRails::Column.from_string('users.bar', :pg)
       end
 
-      it 'should display a deprecated message' do
+      it "should display a deprecated message" do
         expect(AjaxDatatablesRails::Base).to receive(:deprecated)
-        AjaxDatatablesRails::Filter.from_column('users.bar', 'bar', :pg)
+        AjaxDatatablesRails::Column.from_string('users.bar', :pg)
       end
     end
   end
 
-  describe '#to_condition' do
+  describe "#filter_condition" do
     def filter_typecast(db_type)
-      filter = AjaxDatatablesRails::Filter.new(User, 'bar', 'bar', db_type)
-      filter.to_condition.left.expressions.first.right.to_s
+      column = AjaxDatatablesRails::StandardColumn.new(User, 'bar', db_type)
+      column.filter_condition('value').left.expressions.first.right.to_s
     end
 
-    it 'sets VARCHAR if :db_adapter is :pg' do
+    it "sets VARCHAR if :db_adapter is :pg" do
       expect(filter_typecast(:pg)).to eq('VARCHAR')
     end
 
-    it 'sets CHAR if :db_adapter is :mysql2' do
+    it "sets CHAR if :db_adapter is :mysql2" do
       expect(filter_typecast(:mysql2)).to eq('CHAR')
     end
 
-    it 'sets TEXT if :db_adapter is :sqlite3' do
+    it "sets TEXT if :db_adapter is :sqlite3" do
       expect(filter_typecast(:sqlite3)).to eq('TEXT')
+    end
+  end
+
+  describe "#order_condition" do
+    context "for a EnumColumn" do
+      it "should return a SQL sort statement" do
+        column = AjaxDatatablesRails::EnumColumn.new(User, 'status', :pg)
+        expected_asc_sql = 'CASE WHEN "users"."status" = 1 THEN 0 WHEN "users"."status" = 0 THEN 1 ELSE "users"."status" END ASC'
+        expect(column.order_condition(:asc)).to eq(Arel::Nodes::SqlLiteral.new(expected_asc_sql))
+
+        expected_desc_sql = 'CASE WHEN "users"."status" = 0 THEN 0 WHEN "users"."status" = 1 THEN 1 ELSE "users"."status" END DESC'
+        expect(column.order_condition(:desc)).to eq(Arel::Nodes::SqlLiteral.new(expected_desc_sql))
+      end
     end
   end
 end

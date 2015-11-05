@@ -72,11 +72,10 @@ module AjaxDatatablesRails
     end
 
     def sort_records(records)
-      sort_by = []
-      params[:order].each_value do |item|
-        sort_by << "#{sort_column(item)} #{sort_direction(item)}"
+      params[:order].values.reduce(records) do |sorted_records, item|
+        condition = sort_column(item).order_condition(sort_direction(item))
+        sorted_records.order(condition)
       end
-      records.order(sort_by.join(", "))
     end
 
     def paginate_records(records)
@@ -107,23 +106,23 @@ module AjaxDatatablesRails
 
     def build_conditions_for(query)
       search_for = query.split(' ')
-      criteria = search_for.inject([]) do |criteria, atom|
+      search_for.inject([]) do |criteria, atom|
         criteria << searchable_columns.map do |col|
-          Filter.from_column(col, atom, config.db_adapter).to_condition
+          Column.from_string(col, config.db_adapter).filter_condition(atom)
         end.reduce(:or)
       end.reduce(:and)
-      criteria
     end
 
     def aggregate_query
       conditions = if params[:columns]
         searchable_columns.each_with_index.map do |column, index|
-         Filter.from_column(column, params[:columns]["#{index}"][:search][:value], config.db_adapter)
+          value = params[:columns]["#{index}"][:search][:value]
+          Column.from_string(column, config.db_adapter).filter_condition(value)
         end
       else []
       end
 
-      conditions.compact.map(&:to_condition).reduce(:and)
+      conditions.compact.reduce(:and)
     end
 
     def offset
@@ -139,24 +138,13 @@ module AjaxDatatablesRails
     end
 
     def sort_column(item)
-      new_sort_column(item)
-    rescue
-      ::AjaxDatatablesRails::Base.deprecated '[DEPRECATED] Using table_name.column_name notation is deprecated. Please refer to: https://github.com/antillas21/ajax-datatables-rails#searchable-and-sortable-columns-syntax'
-      deprecated_sort_column(item)
-    end
-
-    def deprecated_sort_column(item)
-      sortable_columns[sortable_displayed_columns.index(item[:column])]
-    end
-
-    def new_sort_column(item)
-      model, column = sortable_columns[sortable_displayed_columns.index(item[:column])].split('.')
-      col = [model.constantize.table_name, column].join('.')
+      column = sortable_columns[sortable_displayed_columns.index(item[:column])]
+      Column.from_string(column, config.db_adapter)
     end
 
     def sort_direction(item)
       options = %w(desc asc)
-      options.include?(item[:dir]) ? item[:dir].upcase : 'ASC'
+      options.include?(item[:dir]) ? item[:dir].to_sym : :asc
     end
 
     def sortable_displayed_columns
