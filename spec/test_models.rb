@@ -1,4 +1,5 @@
 class User < ActiveRecord::Base
+  enum status: [:active, :disabled]
 end
 
 class UserData < ActiveRecord::Base

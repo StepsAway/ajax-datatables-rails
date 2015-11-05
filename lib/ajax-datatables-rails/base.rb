@@ -108,50 +108,22 @@ module AjaxDatatablesRails
     def build_conditions_for(query)
       search_for = query.split(' ')
       criteria = search_for.inject([]) do |criteria, atom|
-        criteria << searchable_columns.map { |col| search_condition(col, atom) }.reduce(:or)
+        criteria << searchable_columns.map do |col|
+          Filter.from_column(col, atom, config.db_adapter).to_condition
+        end.reduce(:or)
       end.reduce(:and)
       criteria
     end
 
-    def search_condition(column, value)
-      if column[0] == column.downcase[0]
-        ::AjaxDatatablesRails::Base.deprecated '[DEPRECATED] Using table_name.column_name notation is deprecated. Please refer to: https://github.com/antillas21/ajax-datatables-rails#searchable-and-sortable-columns-syntax'
-        return deprecated_search_condition(column, value)
-      else
-        return new_search_condition(column, value)
-      end
-    end
-
-    def new_search_condition(column, value)
-      model, column = column.split('.')
-      model = model.constantize
-      casted_column = ::Arel::Nodes::NamedFunction.new('CAST', [model.arel_table[column.to_sym].as(typecast)])
-      casted_column.matches("%#{value}%")
-    end
-
-    def deprecated_search_condition(column, value)
-      model, column = column.split('.')
-      model = model.singularize.titleize.gsub( / /, '' ).constantize
-
-      casted_column = ::Arel::Nodes::NamedFunction.new('CAST', [model.arel_table[column.to_sym].as(typecast)])
-      casted_column.matches("%#{value}%")
-    end
-
     def aggregate_query
-      conditions = searchable_columns.each_with_index.map do |column, index|
-        value = params[:columns]["#{index}"][:search][:value] if params[:columns]
-        search_condition(column, value) unless value.blank?
+      conditions = if params[:columns]
+        searchable_columns.each_with_index.map do |column, index|
+         Filter.from_column(column, params[:columns]["#{index}"][:search][:value], config.db_adapter)
+        end
+      else []
       end
-      conditions.compact.reduce(:and)
-    end
 
-    def typecast
-      case config.db_adapter
-      when :oracle then 'VARCHAR2(4000)'  
-      when :pg then 'VARCHAR'
-      when :mysql2 then 'CHAR'
-      when :sqlite3 then 'TEXT'
-      end
+      conditions.compact.map(&:to_condition).reduce(:and)
     end
 
     def offset

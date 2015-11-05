@@ -2,30 +2,32 @@ require 'spec_helper'
 
 describe AjaxDatatablesRails::Base do
 
-  params = {
-    :draw => '5',
-    :columns => {
-      "0" => {
-        :data => '0',
-        :name => '',
-        :searchable => true,
-        :orderable => true,
-        :search => { :value => '', :regex => false }
+  let(:params) do
+    {
+      :draw => '5',
+      :columns => {
+        "0" => {
+          :data => '0',
+          :name => '',
+          :searchable => true,
+          :orderable => true,
+          :search => { :value => '', :regex => false }
+        },
+        "1" => {
+          :data => '1',
+          :name => '',
+          :searchable => true,
+          :orderable => true,
+          :search => { :value => '', :regex => false }
+        }
       },
-      "1" => {
-        :data => '1',
-        :name => '',
-        :searchable => true,
-        :orderable => true,
-        :search => { :value => '', :regex => false }
-      }
-    },
-    :order => { "0" => { :column => '1', :dir => 'desc' } },
-    :start => '0',
-    :length => '10',
-    :search => { :value => '', :regex => false },
-    '_' => '1403141483098'
-  }
+      :order => { "0" => { :column => '1', :dir => 'desc' } },
+      :start => '0',
+      :length => '10',
+      :search => { :value => '', :regex => false },
+      '_' => '1403141483098'
+    }
+  end
   let(:view) { double('view', :params => params) }
 
   describe 'an instance' do
@@ -116,69 +118,6 @@ describe AjaxDatatablesRails::Base do
       end
     end
 
-    describe "#configure" do
-      let(:datatable) do
-        class FooDatatable < AjaxDatatablesRails::Base
-        end
-
-        FooDatatable.new view
-      end
-
-      context "when model class name is regular" do
-        it "should successfully get right model class" do
-          expect(
-            datatable.send(:search_condition, 'User.bar', 'bar')
-          ).to be_a(Arel::Nodes::Matches)
-        end
-      end
-
-      context "when custom named model class" do
-        it "should successfully get right model class" do
-          expect(
-            datatable.send(:search_condition, 'Statistics::Request.bar', 'bar')
-          ).to be_a(Arel::Nodes::Matches)
-        end
-      end
-
-
-      context "when model class name camelcased" do
-        it "should successfully get right model class" do
-          expect(
-            datatable.send(:search_condition, 'PurchasedOrder.bar', 'bar')
-          ).to be_a(Arel::Nodes::Matches)
-        end
-      end
-
-      context "when model class name is namespaced" do
-        it "should successfully get right model class" do
-          expect(
-            datatable.send(:search_condition, 'Statistics::Session.bar', 'bar')
-          ).to be_a(Arel::Nodes::Matches)
-        end
-      end
-
-      context "when model class defined but not found" do
-        it "raise 'uninitialized constant'" do
-          expect {
-            datatable.send(:search_condition, 'UnexistentModel.bar', 'bar')
-          }.to raise_error(NameError, /uninitialized constant/)
-        end
-      end
-
-      context 'when using deprecated notation' do
-        it 'should successfully get right model class if exists' do
-          expect(
-            datatable.send(:search_condition, 'users.bar', 'bar')
-          ).to be_a(Arel::Nodes::Matches)
-        end
-
-        it 'should display a deprecated message' do
-          expect(AjaxDatatablesRails::Base).to receive(:deprecated)
-          datatable.send(:search_condition, 'users.bar', 'bar')
-        end
-      end
-    end
-
     describe '#sortable_columns' do
       it 'returns an array representing database columns' do
         datatable = AjaxDatatablesRails::Base.new(view)
@@ -222,28 +161,43 @@ describe AjaxDatatablesRails::Base do
 
     describe '#filter_records' do
       let(:records) {  double('User', :where => []) }
-      let(:search_view) { double('view', :params => params) }
 
       it 'applies search like functionality on a collection' do
+        params[:search][:value] = 'term'
+        search_view = double('view', :params => params)
+
         datatable = AjaxDatatablesRails::Base.new(search_view)
-        allow(datatable).to receive(:searchable_columns) { ['users.foo'] }
+        allow(datatable).to receive(:searchable_columns) { %w{User.foo User.bar} }
 
         expect(records).to receive(:where)
-        records.where
+        datatable.send(:filter_records, records)
+      end
+
+      it 'applies search like functionality to an enum field' do
+        params[:search][:value] = 'active'
+        search_view = double('view', :params => params)
+
+        datatable = AjaxDatatablesRails::Base.new(search_view)
+        allow(datatable).to receive(:searchable_columns) { %w{User.status} }
+
+        expect(records).to receive(:where).with(User.arel_table[:status].in([0]))
         datatable.send(:filter_records, records)
       end
     end
 
     describe '#filter_records with multi word model' do
-      let(:records) { double('UserData', :where => []) }
-      let(:search_view) { double('view', :params => params) }
+      let(:records) { double('User', :where => []) }
+      let(:search_view) do
+        params[:columns]['0'][:search][:value] = 'term1'
+        params[:columns]['1'][:search][:value] = 'term2'
+        double('view', :params => params)
+      end
 
       it 'applies search like functionality on a collection' do
         datatable = AjaxDatatablesRails::Base.new(search_view)
-        allow(datatable).to receive(:searchable_columns) { ['user_datas.bar'] }
+        allow(datatable).to receive(:searchable_columns) { %w{User.foo User.bar} }
 
         expect(records).to receive(:where)
-        records.where
         datatable.send(:filter_records, records)
       end
     end
@@ -272,6 +226,77 @@ describe AjaxDatatablesRails::Base do
   end
 end
 
+describe AjaxDatatablesRails::Filter do
+  describe '#from_column' do
+    context "when model class name is regular" do
+      it "should successfully get right model class" do
+        expect(AjaxDatatablesRails::Filter).to receive(:new).with(User, 'bar', 'bar', :pg)
+        AjaxDatatablesRails::Filter.from_column('User.bar', 'bar', :pg)
+      end
+    end
+
+    context "when custom named model class" do
+      it "should successfully get right model class" do
+        expect(AjaxDatatablesRails::Filter).to receive(:new).with(Statistics::Request, 'bar', 'bar', :pg)
+        AjaxDatatablesRails::Filter.from_column('Statistics::Request.bar', 'bar', :pg)
+      end
+    end
+
+
+    context "when model class name camelcased" do
+      it "should successfully get right model class" do
+        expect(AjaxDatatablesRails::Filter).to receive(:new).with(PurchasedOrder, 'bar', 'bar', :pg)
+        AjaxDatatablesRails::Filter.from_column('PurchasedOrder.bar', 'bar', :pg)
+      end
+    end
+
+    context "when model class name is namespaced" do
+      it "should successfully get right model class" do
+        expect(AjaxDatatablesRails::Filter).to receive(:new).with(Statistics::Session, 'bar', 'bar', :pg)
+        AjaxDatatablesRails::Filter.from_column('Statistics::Session.bar', 'bar', :pg)
+      end
+    end
+
+    context "when model class defined but not found" do
+      it "raise 'uninitialized constant'" do
+        expect {
+          AjaxDatatablesRails::Filter.from_column('UnexistentModel.bar', 'bar', :pg)
+        }.to raise_error(NameError, /uninitialized constant/)
+      end
+    end
+
+    context 'when using deprecated notation' do
+      it 'should successfully get right model class if exists' do
+        expect(AjaxDatatablesRails::Filter).to receive(:new).with(User, 'bar', 'bar', :pg)
+        AjaxDatatablesRails::Filter.from_column('users.bar', 'bar', :pg)
+      end
+
+      it 'should display a deprecated message' do
+        expect(AjaxDatatablesRails::Base).to receive(:deprecated)
+        AjaxDatatablesRails::Filter.from_column('users.bar', 'bar', :pg)
+      end
+    end
+  end
+
+  describe '#to_condition' do
+    def filter_typecast(db_type)
+      filter = AjaxDatatablesRails::Filter.new(User, 'bar', 'bar', db_type)
+      filter.to_condition.left.expressions.first.right.to_s
+    end
+
+    it 'sets VARCHAR if :db_adapter is :pg' do
+      expect(filter_typecast(:pg)).to eq('VARCHAR')
+    end
+
+    it 'sets CHAR if :db_adapter is :mysql2' do
+      expect(filter_typecast(:mysql2)).to eq('CHAR')
+    end
+
+    it 'sets TEXT if :db_adapter is :sqlite3' do
+      expect(filter_typecast(:sqlite3)).to eq('TEXT')
+    end
+  end
+end
 
 describe AjaxDatatablesRails::Configuration do
   let(:config) { AjaxDatatablesRails::Configuration.new }
@@ -286,49 +311,6 @@ describe AjaxDatatablesRails::Configuration do
     it 'should accept db_adapter custom value' do
       config.db_adapter = :mysql2
       expect(config.db_adapter).to eq(:mysql2)
-    end
-  end
-
-  describe '#typecast' do
-    params = {
-      :draw => '5',
-      :columns => {
-        "0" => {
-          :data => '0',
-          :name => '',
-          :searchable => true,
-          :orderable => true,
-          :search => { :value => '', :regex => false }
-        },
-        "1" => {
-          :data => '1',
-          :name => '',
-          :searchable => true,
-          :orderable => true,
-          :search => { :value => '', :regex => false }
-        }
-      },
-      :order => { "0" => { :column => '1', :dir => 'desc' } },
-      :start => '0',
-      :length => '10',
-      :search => { :value => '', :regex => false },
-      '_' => '1403141483098'
-    }
-    let(:view) { double('view', :params => params) }
-    let(:datatable) { AjaxDatatablesRails::Base.new(view) }
-
-    it 'returns VARCHAR if :db_adapter is :pg' do
-      expect(datatable.send(:typecast)).to eq('VARCHAR')
-    end
-
-    it 'returns CHAR if :db_adapter is :mysql2' do
-      allow_any_instance_of(AjaxDatatablesRails::Configuration).to receive(:db_adapter) { :mysql2 }
-      expect(datatable.send(:typecast)).to eq('CHAR')
-    end
-
-    it 'returns TEXT if :db_adapter is :sqlite3' do
-      allow_any_instance_of(AjaxDatatablesRails::Configuration).to receive(:db_adapter) { :sqlite3 }
-      expect(datatable.send(:typecast)).to eq('TEXT')
     end
   end
 end
@@ -346,6 +328,5 @@ describe AjaxDatatablesRails do
         expect(AjaxDatatablesRails.config.db_adapter).to eq(:mysql2)
       end
     end
-
   end
 end
